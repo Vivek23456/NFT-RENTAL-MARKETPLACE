@@ -89,7 +89,7 @@ Email: vivekatkari910@gmail.com
 LinkedIn: Vivek Atkari
 GitHub: Vivek23456
 
-Made with ❤️ using React, TypeScript, and Blockchain technologies
+ 
 
  
 
