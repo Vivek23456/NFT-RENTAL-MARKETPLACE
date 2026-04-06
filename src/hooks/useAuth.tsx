@@ -2,14 +2,33 @@ import { createContext, useContext, useEffect, useState } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
 
+function getSiteOrigin(): string {
+  if (typeof window !== 'undefined') return window.location.origin;
+  return import.meta.env.VITE_SITE_URL ?? '';
+}
+
+function displayNameFromUser(user: User): string | null {
+  const meta = user.user_metadata ?? {};
+  const name =
+    (typeof meta.full_name === 'string' && meta.full_name) ||
+    (typeof meta.name === 'string' && meta.name) ||
+    (typeof meta.user_name === 'string' && meta.user_name) ||
+    null;
+  return name || (user.email ? user.email.split('@')[0] : null);
+}
+
 interface AuthContextType {
   user: User | null;
   session: Session | null;
   loading: boolean;
   signUp: (email: string, password: string) => Promise<{ error: any }>;
   signIn: (email: string, password: string) => Promise<{ error: any }>;
+  /** Opens Google in the same tab (full redirect), not a popup. */
+  signInWithGoogle: () => Promise<{ error: AuthErrorLike | null }>;
   signOut: () => Promise<{ error: any }>;
 }
+
+type AuthErrorLike = { message: string; name?: string };
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
@@ -58,9 +77,16 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   }, []);
 
   const createUserProfile = async (user: User) => {
-    // Skip profile creation for now since types aren't updated yet
-    // This will be handled by the database trigger automatically
-    console.log('User signed in:', user.email);
+    const displayName = displayNameFromUser(user);
+    if (!displayName) return;
+
+    const { error } = await supabase
+      .from('profiles')
+      .upsert(
+        { id: user.id, display_name: displayName, updated_at: new Date().toISOString() },
+        { onConflict: 'id' }
+      );
+    if (error) console.warn('Profile upsert:', error.message);
   };
 
   const signUp = async (email: string, password: string) => {
@@ -84,6 +110,32 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     return { error };
   };
 
+  const signInWithGoogle = async () => {
+    const redirectTo = `${getSiteOrigin()}/auth/callback`;
+    const { data, error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo,
+        skipBrowserRedirect: true,
+      },
+    });
+    if (error) return { error };
+
+    const url = data.url;
+    if (!url) {
+      return {
+        error: {
+          message:
+            'Google sign-in did not return a URL. Enable the Google provider in Supabase (Authentication → Providers) and add this redirect URL: ' +
+            redirectTo,
+        },
+      };
+    }
+
+    window.location.assign(url);
+    return { error: null };
+  };
+
   const signOut = async () => {
     const { error } = await supabase.auth.signOut();
     return { error };
@@ -95,6 +147,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     loading,
     signUp,
     signIn,
+    signInWithGoogle,
     signOut,
   };
 

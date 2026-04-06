@@ -17,9 +17,27 @@ const Auth = () => {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
   
-  const { signUp, signIn, user } = useAuth();
+  const { signUp, signIn, signInWithGoogle, user } = useAuth();
   const { logAuthFailure, logRateLimitExceeded } = useSecurityMonitor();
   const navigate = useNavigate();
+
+  const handleGoogle = async () => {
+    setLoading(true);
+    try {
+      const { error } = await signInWithGoogle();
+      if (error) {
+        logAuthFailure('Google OAuth error', { error: error.message });
+        toast.error(error.message);
+      }
+    } catch (error) {
+      logAuthFailure('Google OAuth unexpected', {
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+      toast.error('Could not start Google sign in');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (user) {
@@ -119,6 +137,28 @@ const Auth = () => {
           </CardHeader>
           
           <CardContent>
+            <div className="space-y-3 mb-6">
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full"
+                disabled={loading}
+                onClick={handleGoogle}
+              >
+                {loading ? 'Redirecting…' : 'Continue with Google'}
+              </Button>
+              <p className="text-xs text-center text-muted-foreground">
+                Opens Google in this tab (not a small popup). Allow redirects if your browser asks.
+              </p>
+              <div className="relative">
+                <div className="absolute inset-0 flex items-center">
+                  <span className="w-full border-t border-border" />
+                </div>
+                <div className="relative flex justify-center text-xs uppercase">
+                  <span className="bg-card/80 px-2 text-muted-foreground">Or</span>
+                </div>
+              </div>
+            </div>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
                 <Label htmlFor="email" className="flex items-center gap-2">
