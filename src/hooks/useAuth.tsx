@@ -21,8 +21,6 @@ interface AuthContextType {
   user: User | null;
   session: Session | null;
   loading: boolean;
-  signUp: (email: string, password: string) => Promise<{ error: any }>;
-  signIn: (email: string, password: string) => Promise<{ error: any }>;
   /** Opens Google in the same tab (full redirect), not a popup. */
   signInWithGoogle: () => Promise<{ error: AuthErrorLike | null }>;
   signOut: () => Promise<{ error: any }>;
@@ -89,27 +87,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     if (error) console.warn('Profile upsert:', error.message);
   };
 
-  const signUp = async (email: string, password: string) => {
-    const redirectUrl = `${window.location.origin}/`;
-    
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        emailRedirectTo: redirectUrl
-      }
-    });
-    return { error };
-  };
-
-  const signIn = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-    return { error };
-  };
-
   const signInWithGoogle = async () => {
     const redirectTo = `${getSiteOrigin()}/auth/callback`;
     const { data, error } = await supabase.auth.signInWithOAuth({
@@ -145,8 +122,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     user,
     session,
     loading,
-    signUp,
-    signIn,
     signInWithGoogle,
     signOut,
   };
