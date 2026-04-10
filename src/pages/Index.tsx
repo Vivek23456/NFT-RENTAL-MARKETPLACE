@@ -28,8 +28,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import WalletButton from '@/components/WalletButton';
 import NFTCard from '@/components/NFTCard';
 import ListNFTForm, { ListingFormData } from '@/components/ListNFTForm';
+import MarketplaceExplore from '@/components/MarketplaceExplore';
+import type { DemoMarketNft } from '@/data/demoMarketplace';
 import { useToast } from '@/hooks/use-toast';
-import { Clock, Shield, Sparkles } from 'lucide-react';
+import { Clock, Github, Shield, Sparkles } from 'lucide-react';
+import { GITHUB_REPO_URL } from '@/lib/github';
 
 const Index = () => {
   const { connected, publicKey, signTransaction, signAllTransactions } = useWallet();
@@ -37,7 +40,7 @@ const Index = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
-  const [activeTab, setActiveTab] = useState('rentals');
+  const [activeTab, setActiveTab] = useState('explore');
   const [rentalListings, setRentalListings] = useState<any[]>([]);
   const [saleListings, setSaleListings] = useState<any[]>([]);
   const [swapOffers, setSwapOffers] = useState<any[]>([]);
@@ -100,6 +103,11 @@ const Index = () => {
   };
 
   useEffect(() => {
+    if (!program) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
     loadOnChainState();
   }, [program]);
 
@@ -248,41 +256,87 @@ const Index = () => {
     }
   };
 
+  const handleDemoBuy = (nft: DemoMarketNft) => {
+    toast({
+      title: 'Demo listing',
+      description: `${nft.name} is showcase-only. List a real NFT under List Sale / List Rental to trade with SOL on-chain.`,
+    });
+  };
+
+  const gatedNotice = (
+    <Card className="card-glass max-w-md mx-auto text-center">
+      <CardContent className="p-8">
+        <Shield className="w-14 h-14 text-primary mx-auto mb-4" />
+        <h3 className="text-lg font-semibold mb-2">Sign in required</h3>
+        <p className="text-muted-foreground mb-6 text-sm">
+          Connect your wallet and complete sign-in to use on-chain rentals, sales, and swaps.
+        </p>
+        <Button onClick={() => navigate('/auth')}>Open sign-in</Button>
+      </CardContent>
+    </Card>
+  );
+
   return (
     <div className="min-h-screen">
       <nav className="relative z-10 border-b border-primary/15 backdrop-blur-xl bg-background/85">
         <div className="container mx-auto px-6 py-4 flex justify-between items-center">
           <div className="flex items-center gap-2">
             <Sparkles className="w-6 h-6 text-primary drop-shadow-[0_0_8px_hsl(158_100%_45%/0.5)]" />
-            <span className="text-lg font-bold tracking-tight">On-chain NFT Market</span>
+            <div className="flex flex-col leading-tight">
+              <span className="text-lg font-bold tracking-tight">On-chain NFT Market</span>
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-primary">Demo</span>
+            </div>
           </div>
-          <WalletButton />
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" className="gap-2" asChild>
+              <a href={GITHUB_REPO_URL} target="_blank" rel="noopener noreferrer">
+                <Github className="h-4 w-4" />
+                GitHub
+              </a>
+            </Button>
+            <WalletButton />
+          </div>
         </div>
       </nav>
 
-      <section className="py-16">
-        <div className="container mx-auto px-6">
-          {!user ? (
-            <Card className="card-glass max-w-md mx-auto text-center">
-              <CardContent className="p-8">
-                <Shield className="w-16 h-16 text-accent mx-auto mb-4" />
-                <h3 className="text-xl font-semibold mb-2">Wallet sign-in</h3>
-                <p className="text-muted-foreground mb-6">
-                  Connect your Solana wallet, then tap <span className="text-foreground font-medium">Sign in</span> in the header to sign the message and unlock the marketplace.
-                </p>
-                <Button onClick={() => navigate('/auth')}>Open sign-in</Button>
-              </CardContent>
-            </Card>
-          ) : (
-            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-              <TabsList className="grid w-full max-w-3xl mx-auto grid-cols-5 mb-8">
-                <TabsTrigger value="rentals">Rentals</TabsTrigger>
-                <TabsTrigger value="list-rental">List Rental</TabsTrigger>
-                <TabsTrigger value="sales">Sales</TabsTrigger>
-                <TabsTrigger value="list-sale">List Sale</TabsTrigger>
-                <TabsTrigger value="swaps">Swaps</TabsTrigger>
-              </TabsList>
-              
+      <section className="py-10 md:py-16">
+        <div className="container mx-auto px-4 sm:px-6">
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+            <TabsList className="mb-8 flex h-auto min-h-11 w-full max-w-5xl mx-auto flex-wrap justify-center gap-1 rounded-full border border-primary/10 bg-muted/80 p-1">
+              <TabsTrigger value="explore" className="rounded-full px-3 py-2 text-xs sm:text-sm">
+                Explore
+              </TabsTrigger>
+              <TabsTrigger value="rentals" className="rounded-full px-3 py-2 text-xs sm:text-sm">
+                Rentals
+              </TabsTrigger>
+              <TabsTrigger value="list-rental" className="rounded-full px-3 py-2 text-xs sm:text-sm">
+                List Rental
+              </TabsTrigger>
+              <TabsTrigger value="sales" className="rounded-full px-3 py-2 text-xs sm:text-sm">
+                Sales
+              </TabsTrigger>
+              <TabsTrigger value="list-sale" className="rounded-full px-3 py-2 text-xs sm:text-sm">
+                List Sale
+              </TabsTrigger>
+              <TabsTrigger value="swaps" className="rounded-full px-3 py-2 text-xs sm:text-sm">
+                Swaps
+              </TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="explore" className="mt-0">
+              <MarketplaceExplore onDemoBuy={handleDemoBuy} />
+            </TabsContent>
+
+            {!user ? (
+              <>
+                <TabsContent value="rentals">{gatedNotice}</TabsContent>
+                <TabsContent value="list-rental">{gatedNotice}</TabsContent>
+                <TabsContent value="sales">{gatedNotice}</TabsContent>
+                <TabsContent value="list-sale">{gatedNotice}</TabsContent>
+                <TabsContent value="swaps">{gatedNotice}</TabsContent>
+              </>
+            ) : (
+              <>
               <TabsContent value="rentals" className="space-y-6">
                 <div className="flex items-center justify-between">
                   <h2 className="text-2xl font-bold">Rental Listings</h2>
@@ -423,8 +477,9 @@ const Index = () => {
                   </Card>
                 ))}
               </TabsContent>
-            </Tabs>
-          )}
+              </>
+            )}
+          </Tabs>
         </div>
       </section>
     </div>
