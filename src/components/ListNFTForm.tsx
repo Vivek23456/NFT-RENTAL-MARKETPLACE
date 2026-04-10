@@ -186,6 +186,10 @@ const ListNFTForm: React.FC<ListNFTFormProps> = ({ onSubmit, loading = false }) 
           <Plus className="w-5 h-5" />
           List Your NFT for Rent
         </CardTitle>
+        <p className="text-sm text-muted-foreground pt-1">
+          Your NFT is moved into an on-chain escrow for the listing. It stays there for the whole lease so you can recover it
+          after the term (or if the renter ends early).
+        </p>
       </CardHeader>
       
       <CardContent>

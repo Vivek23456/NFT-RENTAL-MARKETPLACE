@@ -1234,99 +1234,6 @@ export type NftRental = {
           }
         },
         {
-          "name": "renterTokenAccount",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "account",
-                "path": "renter"
-              },
-              {
-                "kind": "const",
-                "value": [
-                  6,
-                  221,
-                  246,
-                  225,
-                  215,
-                  101,
-                  161,
-                  147,
-                  217,
-                  203,
-                  225,
-                  70,
-                  206,
-                  235,
-                  121,
-                  172,
-                  28,
-                  180,
-                  133,
-                  237,
-                  95,
-                  91,
-                  55,
-                  145,
-                  58,
-                  140,
-                  245,
-                  133,
-                  126,
-                  255,
-                  0,
-                  169
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "mint"
-              }
-            ],
-            "program": {
-              "kind": "const",
-              "value": [
-                140,
-                151,
-                37,
-                143,
-                78,
-                36,
-                137,
-                241,
-                187,
-                61,
-                16,
-                41,
-                20,
-                142,
-                13,
-                131,
-                11,
-                90,
-                19,
-                153,
-                218,
-                255,
-                16,
-                132,
-                4,
-                142,
-                123,
-                216,
-                219,
-                233,
-                248,
-                89
-              ]
-            }
-          }
-        },
-        {
-          "name": "mint"
-        },
-        {
           "name": "owner",
           "writable": true
         },
@@ -1338,18 +1245,6 @@ export type NftRental = {
         {
           "name": "systemProgram",
           "address": "11111111111111111111111111111111"
-        },
-        {
-          "name": "tokenProgram",
-          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
-        },
-        {
-          "name": "associatedTokenProgram",
-          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
-        },
-        {
-          "name": "rent",
-          "address": "SysvarRent111111111111111111111111111111111"
         }
       ],
       "args": [
@@ -1405,37 +1300,6 @@ export type NftRental = {
           }
         },
         {
-          "name": "escrowTokenAccount",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  114,
-                  101,
-                  110,
-                  116,
-                  97,
-                  108,
-                  95,
-                  101,
-                  115,
-                  99,
-                  114,
-                  111,
-                  119
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "listing.mint",
-                "account": "rentalListing"
-              }
-            ]
-          }
-        },
-        {
           "name": "escrowVault",
           "writable": true,
           "pda": {
@@ -1466,10 +1330,6 @@ export type NftRental = {
           }
         },
         {
-          "name": "renterTokenAccount",
-          "writable": true
-        },
-        {
           "name": "renter",
           "writable": true,
           "signer": true
@@ -1477,10 +1337,6 @@ export type NftRental = {
         {
           "name": "systemProgram",
           "address": "11111111111111111111111111111111"
-        },
-        {
-          "name": "tokenProgram",
-          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
         }
       ],
       "args": []
@@ -1637,61 +1493,66 @@ export type NftRental = {
     },
     {
       "code": 6003,
+      "name": "escrowMissingNft",
+      "msg": "Rental escrow must hold the NFT"
+    },
+    {
+      "code": 6004,
       "name": "overflow",
       "msg": "Arithmetic overflow"
     },
     {
-      "code": 6004,
+      "code": 6005,
       "name": "notRented",
       "msg": "NFT is not currently rented"
     },
     {
-      "code": 6005,
+      "code": 6006,
       "name": "unauthorizedRenter",
       "msg": "Unauthorized renter"
     },
     {
-      "code": 6006,
+      "code": 6007,
       "name": "rentalNotExpired",
       "msg": "Rental period has not expired yet"
     },
     {
-      "code": 6007,
+      "code": 6008,
       "name": "cannotUnlistRentedNft",
       "msg": "Cannot unlist an NFT that is currently rented"
     },
     {
-      "code": 6008,
+      "code": 6009,
       "name": "invalidPrice",
       "msg": "Price must be greater than zero"
     },
     {
-      "code": 6009,
+      "code": 6010,
       "name": "saleNotActive",
       "msg": "Sale listing is not active"
     },
     {
-      "code": 6010,
+      "code": 6011,
       "name": "cannotBuyOwnListing",
       "msg": "Cannot buy your own listing"
     },
     {
-      "code": 6011,
+      "code": 6012,
       "name": "unauthorizedOwner",
       "msg": "Unauthorized owner account"
     },
     {
-      "code": 6012,
+      "code": 6013,
       "name": "swapNotActive",
       "msg": "Swap offer is not active"
     },
     {
-      "code": 6013,
+      "code": 6014,
       "name": "cannotSwapWithSelf",
       "msg": "Cannot swap with self"
     },
     {
-      "code": 6014,
+      "code": 6015,
       "name": "invalidSwapMint",
       "msg": "Swap mint did not match required mint"
     }

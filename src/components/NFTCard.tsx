@@ -16,14 +16,32 @@ interface NFTCardProps {
     collateralLamports: number;
     minDurationSecs: number;
     maxDurationSecs: number;
+    /** True when the listing is open for a new renter (not currently leased). */
     active: boolean;
-    currentRental?: string;
+    currentRenter?: string | null;
+    rentalEndTimeUnix?: number | null;
   };
+  viewerWallet?: string | null;
   onRent: (listingId: string, durationDays: number) => void;
+  onReturnRental?: (mint: string) => void;
+  onClaimExpired?: (mint: string) => void;
+  onUnlistRental?: (mint: string) => void;
 }
 
-const NFTCard: React.FC<NFTCardProps> = ({ listing, onRent }) => {
+const NFTCard: React.FC<NFTCardProps> = ({
+  listing,
+  viewerWallet,
+  onRent,
+  onReturnRental,
+  onClaimExpired,
+  onUnlistRental,
+}) => {
   const [showRentDialog, setShowRentDialog] = useState(false);
+  const nowSec = Math.floor(Date.now() / 1000);
+  const isRenter = !!viewerWallet && listing.currentRenter === viewerWallet;
+  const isOwner = !!viewerWallet && listing.owner === viewerWallet;
+  const leaseExpired =
+    listing.rentalEndTimeUnix != null && nowSec >= listing.rentalEndTimeUnix;
   
   const formatDuration = (seconds: number) => {
     const days = Math.floor(seconds / 86400);
@@ -83,17 +101,40 @@ const NFTCard: React.FC<NFTCardProps> = ({ listing, onRent }) => {
               {formatDuration(listing.minDurationSecs)} - {formatDuration(listing.maxDurationSecs)}
             </span>
           </div>
+          {!listing.active && listing.rentalEndTimeUnix != null && (
+            <p className="text-xs text-muted-foreground">
+              Lease ends {new Date(listing.rentalEndTimeUnix * 1000).toLocaleString()}
+            </p>
+          )}
+          <p className="text-xs text-muted-foreground">
+            NFT stays in on-chain escrow for the lease. You prove the rental from your wallet, not by holding the token.
+          </p>
         </CardContent>
 
-        <CardFooter className="p-4 pt-0">
-          <Button 
-            variant="hero" 
-            className="w-full" 
+        <CardFooter className="p-4 pt-0 flex flex-col gap-2">
+          <Button
+            variant="hero"
+            className="w-full"
             onClick={handleRentClick}
             disabled={!listing.active}
           >
-            {listing.active ? "Rent NFT" : "Currently Rented"}
+            {listing.active ? 'Rent NFT' : 'Not available to rent'}
           </Button>
+          {isRenter && onReturnRental && (
+            <Button variant="outline" className="w-full" onClick={() => onReturnRental(listing.mint)}>
+              End rental and refund collateral
+            </Button>
+          )}
+          {isOwner && listing.currentRenter && leaseExpired && onClaimExpired && (
+            <Button variant="secondary" className="w-full" onClick={() => onClaimExpired(listing.mint)}>
+              Claim NFT (lease expired)
+            </Button>
+          )}
+          {isOwner && !listing.currentRenter && onUnlistRental && (
+            <Button variant="outline" className="w-full" onClick={() => onUnlistRental(listing.mint)}>
+              Remove listing
+            </Button>
+          )}
         </CardFooter>
       </Card>
 

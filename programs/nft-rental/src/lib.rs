@@ -95,21 +95,12 @@ pub mod nft_rental {
             total_payment,
         )?;
 
-        let escrow_bump = [ctx.bumps.escrow_token_account];
-        let escrow_seeds: &[&[u8]] = &[b"rental_escrow", listing.mint.as_ref(), &escrow_bump];
-        let escrow_signer = &[escrow_seeds];
-        token::transfer(
-            CpiContext::new_with_signer(
-                ctx.accounts.token_program.to_account_info(),
-                Transfer {
-                    from: ctx.accounts.escrow_token_account.to_account_info(),
-                    to: ctx.accounts.renter_token_account.to_account_info(),
-                    authority: ctx.accounts.escrow_token_account.to_account_info(),
-                },
-                escrow_signer,
-            ),
-            1,
-        )?;
+        // NFT stays in program escrow for the lease so the lender can recover it after expiry
+        // without the renter transferring the SPL token back.
+        require!(
+            ctx.accounts.escrow_token_account.amount == 1,
+            RentalError::EscrowMissingNft
+        );
 
         listing.current_renter = Some(ctx.accounts.renter.key());
         listing.rental_end_time = Some(clock.unix_timestamp + (duration_days as i64 * SECONDS_PER_DAY));
@@ -140,18 +131,6 @@ pub mod nft_rental {
             listing.current_renter.unwrap() == ctx.accounts.renter.key(),
             RentalError::UnauthorizedRenter
         );
-
-        token::transfer(
-            CpiContext::new(
-                ctx.accounts.token_program.to_account_info(),
-                Transfer {
-                    from: ctx.accounts.renter_token_account.to_account_info(),
-                    to: ctx.accounts.escrow_token_account.to_account_info(),
-                    authority: ctx.accounts.renter.to_account_info(),
-                },
-            ),
-            1,
-        )?;
 
         let vault_bump = [ctx.bumps.escrow_vault];
         let vault_seeds: &[&[u8]] = &[b"rental_vault", listing.mint.as_ref(), &vault_bump];
@@ -481,7 +460,8 @@ pub struct RentNFT<'info> {
     #[account(
         mut,
         seeds = [b"rental_escrow", listing.mint.as_ref()],
-        bump
+        bump,
+        constraint = escrow_token_account.mint == listing.mint
     )]
     pub escrow_token_account: Account<'info, TokenAccount>,
     #[account(
@@ -491,24 +471,12 @@ pub struct RentNFT<'info> {
     )]
     /// CHECK: PDA used as SOL vault.
     pub escrow_vault: AccountInfo<'info>,
-    #[account(
-        init_if_needed,
-        payer = renter,
-        associated_token::mint = mint,
-        associated_token::authority = renter
-    )]
-    pub renter_token_account: Account<'info, TokenAccount>,
-    #[account(address = listing.mint)]
-    pub mint: Account<'info, Mint>,
     /// CHECK: receives rent payout.
     #[account(mut)]
     pub owner: AccountInfo<'info>,
     #[account(mut)]
     pub renter: Signer<'info>,
     pub system_program: Program<'info, System>,
-    pub token_program: Program<'info, Token>,
-    pub associated_token_program: Program<'info, AssociatedToken>,
-    pub rent: Sysvar<'info, Rent>,
 }
 
 #[derive(Accounts)]
@@ -521,28 +489,14 @@ pub struct ReturnNFT<'info> {
     pub listing: Account<'info, RentalListing>,
     #[account(
         mut,
-        seeds = [b"rental_escrow", listing.mint.as_ref()],
-        bump
-    )]
-    pub escrow_token_account: Account<'info, TokenAccount>,
-    #[account(
-        mut,
         seeds = [b"rental_vault", listing.mint.as_ref()],
         bump
     )]
     /// CHECK: PDA used as SOL vault.
     pub escrow_vault: AccountInfo<'info>,
-    #[account(
-        mut,
-        constraint = renter_token_account.mint == listing.mint,
-        constraint = renter_token_account.owner == renter.key(),
-        constraint = renter_token_account.amount == 1
-    )]
-    pub renter_token_account: Account<'info, TokenAccount>,
     #[account(mut)]
     pub renter: Signer<'info>,
     pub system_program: Program<'info, System>,
-    pub token_program: Program<'info, Token>,
 }
 
 #[derive(Accounts)]
@@ -850,6 +804,8 @@ pub enum RentalError {
     AlreadyRented,
     #[msg("Invalid rental duration")]
     InvalidDuration,
+    #[msg("Rental escrow must hold the NFT")]
+    EscrowMissingNft,
     #[msg("Arithmetic overflow")]
     Overflow,
     #[msg("NFT is not currently rented")]

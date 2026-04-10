@@ -125,7 +125,6 @@ export async function rentNFT(program: Program, mint: PublicKey, owner: PublicKe
   const [listing] = getRentalListingAddress(mint);
   const [escrowTokenAccount] = getRentalEscrowAddress(mint);
   const [escrowVault] = getRentalVaultAddress(mint);
-  const renterTokenAccount = await getAssociatedTokenAddress(mint, program.provider.publicKey!);
 
   return program.methods
     .rentNft(durationDays)
@@ -133,14 +132,61 @@ export async function rentNFT(program: Program, mint: PublicKey, owner: PublicKe
       listing,
       escrowTokenAccount,
       escrowVault,
-      renterTokenAccount,
-      mint,
       owner,
       renter: program.provider.publicKey!,
       systemProgram: SystemProgram.programId,
+    })
+    .rpc();
+}
+
+export async function returnRentalNft(program: Program, mint: PublicKey) {
+  const [listing] = getRentalListingAddress(mint);
+  const [escrowVault] = getRentalVaultAddress(mint);
+
+  return program.methods
+    .returnNft()
+    .accounts({
+      listing,
+      escrowVault,
+      renter: program.provider.publicKey!,
+      systemProgram: SystemProgram.programId,
+    })
+    .rpc();
+}
+
+export async function claimExpiredRentalNft(program: Program, mint: PublicKey) {
+  const [listing] = getRentalListingAddress(mint);
+  const [escrowTokenAccount] = getRentalEscrowAddress(mint);
+  const [escrowVault] = getRentalVaultAddress(mint);
+  const ownerTokenAccount = await getAssociatedTokenAddress(mint, program.provider.publicKey!);
+
+  return program.methods
+    .claimExpiredNft()
+    .accounts({
+      listing,
+      escrowTokenAccount,
+      escrowVault,
+      ownerTokenAccount,
+      owner: program.provider.publicKey!,
+      systemProgram: SystemProgram.programId,
       tokenProgram: TOKEN_PROGRAM_ID,
-      associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
-      rent: SYSVAR_RENT_PUBKEY,
+    })
+    .rpc();
+}
+
+export async function unlistRentalNft(program: Program, mint: PublicKey) {
+  const [listing] = getRentalListingAddress(mint);
+  const [escrowTokenAccount] = getRentalEscrowAddress(mint);
+  const ownerTokenAccount = await getAssociatedTokenAddress(mint, program.provider.publicKey!);
+
+  return program.methods
+    .unlistNft()
+    .accounts({
+      listing,
+      escrowTokenAccount,
+      ownerTokenAccount,
+      owner: program.provider.publicKey!,
+      tokenProgram: TOKEN_PROGRAM_ID,
     })
     .rpc();
 }

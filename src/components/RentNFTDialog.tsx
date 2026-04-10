@@ -192,8 +192,9 @@ const RentNFTDialog: React.FC<RentNFTDialogProps> = ({
                   <div className="text-xs">
                     <p className="font-medium text-accent">Collateral Protection</p>
                     <p className="text-muted-foreground">
-                      Your collateral will be refunded when you return the NFT on time.
-                      Late returns may incur penalties.
+                      Collateral is released when you confirm <strong className="text-foreground">End rental</strong> on-chain
+                      before the lease ends. The NFT remains in program escrow for the whole term. After the end time, the
+                      lender can claim the NFT and collateral if you did not end the rental.
                     </p>
                   </div>
                 </div>

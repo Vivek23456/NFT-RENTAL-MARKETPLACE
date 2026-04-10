@@ -1,6 +1,7 @@
 import { useMemo, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useWallet, useConnection } from '@solana/wallet-adapter-react';
+import { BN } from '@coral-xyz/anchor';
 import { getAssociatedTokenAddress } from '@solana/spl-token';
 import { PublicKey } from '@solana/web3.js';
 import {
@@ -8,6 +9,7 @@ import {
   buySaleNFT,
   cancelSaleNFT,
   cancelSwapOffer,
+  claimExpiredRentalNft,
   createSwapOffer,
   fetchRentalListings,
   fetchSaleListings,
@@ -16,7 +18,9 @@ import {
   listRentalNFT,
   listSaleNFT,
   rentNFT,
+  returnRentalNft,
   toLamports,
+  unlistRentalNft,
 } from '@/lib/anchor';
 import { useAuth } from '@/hooks/useAuth';
 import { Button } from '@/components/ui/button';
@@ -63,18 +67,31 @@ const Index = () => {
       ]);
 
       setRentalListings(
-        rentals.map((entry) => ({
-          id: entry.publicKey.toBase58(),
-          owner: entry.account.owner.toBase58(),
-          mint: entry.account.mint.toBase58(),
-          name: `Rental ${entry.account.mint.toBase58().slice(0, 6)}`,
-          image: 'https://via.placeholder.com/400x400?text=Rental+NFT',
-          dailyRentLamports: entry.account.dailyRentLamports.toNumber(),
-          collateralLamports: entry.account.collateralLamports.toNumber(),
-          minDurationSecs: entry.account.minDurationDays * 86400,
-          maxDurationSecs: entry.account.maxDurationDays * 86400,
-          active: entry.account.isActive,
-        }))
+        rentals.map((entry) => {
+          const end = entry.account.rentalEndTime;
+          const rentalEndTimeUnix = end == null ? null : new BN(end as BN).toNumber();
+          const cr = entry.account.currentRenter;
+          const currentRenter =
+            cr == null
+              ? null
+              : typeof (cr as PublicKey).toBase58 === 'function'
+                ? (cr as PublicKey).toBase58()
+                : new PublicKey(cr as string).toBase58();
+          return {
+            id: entry.publicKey.toBase58(),
+            owner: entry.account.owner.toBase58(),
+            mint: entry.account.mint.toBase58(),
+            name: `Rental ${entry.account.mint.toBase58().slice(0, 6)}`,
+            image: 'https://via.placeholder.com/400x400?text=Rental+NFT',
+            dailyRentLamports: entry.account.dailyRentLamports.toNumber(),
+            collateralLamports: entry.account.collateralLamports.toNumber(),
+            minDurationSecs: entry.account.minDurationDays * 86400,
+            maxDurationSecs: entry.account.maxDurationDays * 86400,
+            active: entry.account.isActive && currentRenter == null,
+            currentRenter,
+            rentalEndTimeUnix,
+          };
+        })
       );
       setSaleListings(
         sales.map((entry) => ({
@@ -175,6 +192,51 @@ const Index = () => {
       await loadOnChainState();
     } catch (error: any) {
       toast({ title: 'Error', description: error.message || 'Failed to rent NFT', variant: 'destructive' });
+    }
+  };
+
+  const handleReturnRental = async (mintStr: string) => {
+    if (!user) {
+      navigate('/auth');
+      return;
+    }
+    try {
+      if (!program) throw new Error('Wallet not connected');
+      await returnRentalNft(program, new PublicKey(mintStr));
+      toast({ title: 'Rental ended', description: 'Collateral was sent back to your wallet.' });
+      await loadOnChainState();
+    } catch (error: any) {
+      toast({ title: 'Error', description: error.message || 'Failed to end rental', variant: 'destructive' });
+    }
+  };
+
+  const handleClaimExpiredRental = async (mintStr: string) => {
+    if (!user) {
+      navigate('/auth');
+      return;
+    }
+    try {
+      if (!program) throw new Error('Wallet not connected');
+      await claimExpiredRentalNft(program, new PublicKey(mintStr));
+      toast({ title: 'Claimed', description: 'NFT and collateral returned to your wallet. Listing closed.' });
+      await loadOnChainState();
+    } catch (error: any) {
+      toast({ title: 'Error', description: error.message || 'Failed to claim expired rental', variant: 'destructive' });
+    }
+  };
+
+  const handleUnlistRental = async (mintStr: string) => {
+    if (!user) {
+      navigate('/auth');
+      return;
+    }
+    try {
+      if (!program) throw new Error('Wallet not connected');
+      await unlistRentalNft(program, new PublicKey(mintStr));
+      toast({ title: 'Listing removed', description: 'NFT returned from escrow to your wallet.' });
+      await loadOnChainState();
+    } catch (error: any) {
+      toast({ title: 'Error', description: error.message || 'Failed to remove listing', variant: 'destructive' });
     }
   };
 
@@ -338,11 +400,16 @@ const Index = () => {
             ) : (
               <>
               <TabsContent value="rentals" className="space-y-6">
-                <div className="flex items-center justify-between">
-                  <h2 className="text-2xl font-bold">Rental Listings</h2>
-                  <Badge variant="secondary" className="gap-2">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h2 className="text-2xl font-bold">On-chain rentals</h2>
+                    <p className="text-sm text-muted-foreground">
+                      Rent from other wallets on devnet, or manage your own listings (return, claim after expiry, unlist).
+                    </p>
+                  </div>
+                  <Badge variant="secondary" className="gap-2 shrink-0">
                     <Clock className="w-4 h-4" />
-                    {rentalListings.length} Active
+                    {rentalListings.length} listing{rentalListings.length === 1 ? '' : 's'}
                   </Badge>
                 </div>
                 
@@ -369,7 +436,11 @@ const Index = () => {
                         <NFTCard
                           key={listing.id}
                           listing={listing}
+                          viewerWallet={publicKey?.toBase58() ?? null}
                           onRent={handleRentNFT}
+                          onReturnRental={handleReturnRental}
+                          onClaimExpired={handleClaimExpiredRental}
+                          onUnlistRental={handleUnlistRental}
                         />
                       ))}
                     </div>
