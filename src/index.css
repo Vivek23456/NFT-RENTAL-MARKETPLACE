@@ -8,48 +8,49 @@ All colors MUST be HSL.
 
 @layer base {
   :root {
-    --background: 220 24% 8%;
-    --foreground: 210 40% 98%;
+    /* pump.fun–adjacent: near-black + neon mint */
+    --background: 0 0% 4%;
+    --foreground: 0 0% 98%;
 
-    --card: 220 24% 10%;
-    --card-foreground: 210 40% 98%;
+    --card: 0 0% 7%;
+    --card-foreground: 0 0% 98%;
 
-    --popover: 220 24% 12%;
-    --popover-foreground: 210 40% 98%;
+    --popover: 0 0% 9%;
+    --popover-foreground: 0 0% 98%;
 
-    --primary: 263 70% 50%;
-    --primary-foreground: 210 40% 98%;
+    --primary: 158 100% 45%;
+    --primary-foreground: 160 100% 6%;
 
-    --secondary: 220 14% 20%;
-    --secondary-foreground: 210 40% 98%;
+    --secondary: 0 0% 12%;
+    --secondary-foreground: 0 0% 96%;
 
-    --muted: 220 14% 18%;
-    --muted-foreground: 215 20.2% 65.1%;
+    --muted: 0 0% 11%;
+    --muted-foreground: 0 0% 58%;
 
-    --accent: 262 83% 58%;
-    --accent-foreground: 210 40% 98%;
+    --accent: 152 100% 38%;
+    --accent-foreground: 0 0% 98%;
 
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
+    --destructive: 0 72% 42%;
+    --destructive-foreground: 0 0% 98%;
 
-    --border: 220 14% 20%;
-    --input: 220 14% 18%;
-    --ring: 263 70% 50%;
+    --border: 152 12% 16%;
+    --input: 0 0% 14%;
+    --ring: 158 100% 45%;
 
-    /* Web3 Design System */
-    --gradient-primary: linear-gradient(135deg, hsl(263, 70%, 50%), hsl(280, 100%, 70%));
-    --gradient-secondary: linear-gradient(135deg, hsl(262, 83%, 58%), hsl(245, 100%, 75%));
-    --gradient-accent: linear-gradient(135deg, hsl(195, 100%, 50%), hsl(220, 100%, 60%));
-    --gradient-hero: linear-gradient(135deg, hsl(220, 24%, 8%) 0%, hsl(263, 70%, 20%) 50%, hsl(280, 100%, 30%) 100%);
-    
-    --glow-primary: 0 0 20px hsl(263 70% 50% / 0.3);
-    --glow-accent: 0 0 30px hsl(262 83% 58% / 0.4);
-    --glow-success: 0 0 20px hsl(142 76% 36% / 0.3);
+    --gradient-primary: linear-gradient(135deg, hsl(158, 100%, 48%) 0%, hsl(168, 100%, 38%) 100%);
+    --gradient-secondary: linear-gradient(135deg, hsl(152, 100%, 36%) 0%, hsl(142, 90%, 32%) 100%);
+    --gradient-accent: linear-gradient(135deg, hsl(172, 100%, 42%) 0%, hsl(158, 100%, 45%) 100%);
+    --gradient-hero: radial-gradient(120% 80% at 50% -20%, hsl(158 100% 45% / 0.14) 0%, hsl(0 0% 4%) 45%, hsl(0 0% 3%) 100%);
+    --gradient-subtle: radial-gradient(ellipse 100% 60% at 50% 0%, hsl(158 100% 45% / 0.08) 0%, transparent 55%);
+
+    --glow-primary: 0 0 24px hsl(158 100% 45% / 0.35);
+    --glow-accent: 0 0 40px hsl(158 100% 50% / 0.2);
+    --glow-success: 0 0 20px hsl(158 100% 45% / 0.35);
     
     --animation-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     --animation-bounce: all 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
 
-    --radius: 0.5rem;
+    --radius: 0.75rem;
 
     --sidebar-background: 0 0% 98%;
 
@@ -69,42 +70,43 @@ All colors MUST be HSL.
   }
 
   .light {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
+    --background: 0 0% 99%;
+    --foreground: 0 0% 9%;
 
     --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
+    --card-foreground: 0 0% 9%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
+    --popover-foreground: 0 0% 9%;
 
-    --primary: 263 70% 50%;
-    --primary-foreground: 210 40% 98%;
+    --primary: 158 100% 32%;
+    --primary-foreground: 0 0% 100%;
 
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
+    --secondary: 152 20% 94%;
+    --secondary-foreground: 0 0% 12%;
 
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
+    --muted: 0 0% 94%;
+    --muted-foreground: 0 0% 42%;
 
-    --accent: 262 83% 58%;
-    --accent-foreground: 210 40% 98%;
+    --accent: 152 100% 32%;
+    --accent-foreground: 0 0% 100%;
 
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
+    --destructive: 0 84% 48%;
+    --destructive-foreground: 0 0% 98%;
 
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 263 70% 50%;
-    
-    --gradient-primary: linear-gradient(135deg, hsl(263, 70%, 50%), hsl(280, 100%, 70%));
-    --gradient-secondary: linear-gradient(135deg, hsl(262, 83%, 58%), hsl(245, 100%, 75%));
-    --gradient-accent: linear-gradient(135deg, hsl(195, 100%, 50%), hsl(220, 100%, 60%));
-    --gradient-hero: linear-gradient(135deg, hsl(0, 0%, 100%) 0%, hsl(263, 70%, 95%) 50%, hsl(280, 100%, 95%) 100%);
-    
-    --glow-primary: 0 0 20px hsl(263 70% 50% / 0.2);
-    --glow-accent: 0 0 30px hsl(262 83% 58% / 0.3);
-    --glow-success: 0 0 20px hsl(142 76% 36% / 0.2);
+    --border: 152 12% 88%;
+    --input: 0 0% 90%;
+    --ring: 158 100% 32%;
+
+    --gradient-primary: linear-gradient(135deg, hsl(158, 100%, 38%) 0%, hsl(168, 100%, 32%) 100%);
+    --gradient-secondary: linear-gradient(135deg, hsl(152, 100%, 34%) 0%, hsl(142, 80%, 30%) 100%);
+    --gradient-accent: linear-gradient(135deg, hsl(172, 90%, 36%) 0%, hsl(158, 100%, 36%) 100%);
+    --gradient-hero: linear-gradient(180deg, hsl(152 40% 96%) 0%, hsl(0 0% 100%) 55%);
+    --gradient-subtle: radial-gradient(ellipse 100% 50% at 50% 0%, hsl(158 80% 45% / 0.12) 0%, transparent 50%);
+
+    --glow-primary: 0 0 20px hsl(158 100% 38% / 0.2);
+    --glow-accent: 0 0 28px hsl(158 100% 40% / 0.15);
+    --glow-success: 0 0 20px hsl(158 100% 38% / 0.2);
     --sidebar-background: 240 5.9% 10%;
     --sidebar-foreground: 240 4.8% 95.9%;
     --sidebar-primary: 224.3 76.3% 48%;
@@ -123,7 +125,9 @@ All colors MUST be HSL.
 
   body {
     @apply bg-background text-foreground font-sans antialiased;
-    background: var(--gradient-hero);
+    background-color: hsl(var(--background));
+    background-image: var(--gradient-hero);
+    background-attachment: fixed;
   }
 }
 
@@ -141,8 +145,10 @@ All colors MUST be HSL.
   }
   
   .card-glass {
-    @apply backdrop-blur-xl bg-card/80 border border-white/10;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
+    @apply backdrop-blur-xl bg-card/85 border border-primary/15;
+    box-shadow:
+      0 0 0 1px hsl(158 100% 45% / 0.06),
+      0 12px 40px rgba(0, 0, 0, 0.45);
   }
   
   .glow-text {

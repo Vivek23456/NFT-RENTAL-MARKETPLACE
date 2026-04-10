@@ -1,11 +1,10 @@
 use anchor_lang::prelude::*;
 use anchor_spl::{
     associated_token::AssociatedToken,
-    token::{self, Mint, Token, TokenAccount, Transfer},
+    token::{self, accessor, Mint, Token, TokenAccount, Transfer},
 };
-use mpl_token_metadata::accounts::Metadata;
 
-declare_id!("Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS");
+declare_id!("B5D4oqW13D5tGhBm9qNSUQxpxeiRZFPJUo6Eh5BYoWdW");
 
 #[program]
 pub mod nft_rental {
@@ -18,21 +17,37 @@ pub mod nft_rental {
         min_duration_days: u32,
         max_duration_days: u32,
     ) -> Result<()> {
+        require!(daily_rent_lamports > 0, RentalError::InvalidPrice);
+        require!(min_duration_days > 0, RentalError::InvalidDuration);
+        require!(max_duration_days >= min_duration_days, RentalError::InvalidDuration);
+        require!(
+            accessor::mint(&ctx.accounts.owner_token_account)? == ctx.accounts.mint.key(),
+            RentalError::InvalidSwapMint
+        );
+        require!(
+            accessor::authority(&ctx.accounts.owner_token_account)? == ctx.accounts.owner.key(),
+            RentalError::UnauthorizedOwner
+        );
+        require!(
+            accessor::amount(&ctx.accounts.owner_token_account)? >= 1,
+            RentalError::InvalidDuration
+        );
+
         let listing = &mut ctx.accounts.listing;
         let clock = Clock::get()?;
 
-        // Transfer NFT to escrow
-        let transfer_ctx = CpiContext::new(
-            ctx.accounts.token_program.to_account_info(),
-            Transfer {
-                from: ctx.accounts.owner_token_account.to_account_info(),
-                to: ctx.accounts.escrow_token_account.to_account_info(),
-                authority: ctx.accounts.owner.to_account_info(),
-            },
-        );
-        token::transfer(transfer_ctx, 1)?;
+        token::transfer(
+            CpiContext::new(
+                ctx.accounts.token_program.to_account_info(),
+                Transfer {
+                    from: ctx.accounts.owner_token_account.to_account_info(),
+                    to: ctx.accounts.escrow_token_account.to_account_info(),
+                    authority: ctx.accounts.owner.to_account_info(),
+                },
+            ),
+            1,
+        )?;
 
-        // Initialize listing
         listing.owner = ctx.accounts.owner.key();
         listing.mint = ctx.accounts.mint.key();
         listing.daily_rent_lamports = daily_rent_lamports;
@@ -47,10 +62,7 @@ pub mod nft_rental {
         Ok(())
     }
 
-    pub fn rent_nft(
-        ctx: Context<RentNFT>,
-        duration_days: u32,
-    ) -> Result<()> {
+    pub fn rent_nft(ctx: Context<RentNFT>, duration_days: u32) -> Result<()> {
         let listing = &mut ctx.accounts.listing;
         let clock = Clock::get()?;
 
@@ -60,68 +72,68 @@ pub mod nft_rental {
             duration_days >= listing.min_duration_days && duration_days <= listing.max_duration_days,
             RentalError::InvalidDuration
         );
+        require!(
+            ctx.accounts.owner.key() == listing.owner,
+            RentalError::UnauthorizedOwner
+        );
 
         let total_rent = (listing.daily_rent_lamports as u128)
             .checked_mul(duration_days as u128)
             .ok_or(RentalError::Overflow)? as u64;
-        
         let total_payment = total_rent
             .checked_add(listing.collateral_lamports)
             .ok_or(RentalError::Overflow)?;
 
-        // Transfer payment from renter to escrow
-        let transfer_ctx = CpiContext::new(
-            ctx.accounts.system_program.to_account_info(),
-            anchor_lang::system_program::Transfer {
-                from: ctx.accounts.renter.to_account_info(),
-                to: ctx.accounts.escrow_vault.to_account_info(),
-            },
-        );
-        anchor_lang::system_program::transfer(transfer_ctx, total_payment)?;
+        anchor_lang::system_program::transfer(
+            CpiContext::new(
+                ctx.accounts.system_program.to_account_info(),
+                anchor_lang::system_program::Transfer {
+                    from: ctx.accounts.renter.to_account_info(),
+                    to: ctx.accounts.escrow_vault.to_account_info(),
+                },
+            ),
+            total_payment,
+        )?;
 
-        // Transfer NFT to renter
-        let bump = ctx.bumps.escrow_token_account;
-        let seeds = &[
-            b"escrow",
-            listing.mint.as_ref(),
-            &[bump],
-        ];
-        let signer_seeds = &[&seeds[..]];
+        let escrow_bump = [ctx.bumps.escrow_token_account];
+        let escrow_seeds: &[&[u8]] = &[b"rental_escrow", listing.mint.as_ref(), &escrow_bump];
+        let escrow_signer = &[escrow_seeds];
+        token::transfer(
+            CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(),
+                Transfer {
+                    from: ctx.accounts.escrow_token_account.to_account_info(),
+                    to: ctx.accounts.renter_token_account.to_account_info(),
+                    authority: ctx.accounts.escrow_token_account.to_account_info(),
+                },
+                escrow_signer,
+            ),
+            1,
+        )?;
 
-        let transfer_ctx = CpiContext::new_with_signer(
-            ctx.accounts.token_program.to_account_info(),
-            Transfer {
-                from: ctx.accounts.escrow_token_account.to_account_info(),
-                to: ctx.accounts.renter_token_account.to_account_info(),
-                authority: ctx.accounts.escrow_token_account.to_account_info(),
-            },
-            signer_seeds,
-        );
-        token::transfer(transfer_ctx, 1)?;
-
-        // Update listing
         listing.current_renter = Some(ctx.accounts.renter.key());
-        listing.rental_end_time = Some(
-            clock.unix_timestamp + (duration_days as i64 * 24 * 60 * 60)
-        );
+        listing.rental_end_time = Some(clock.unix_timestamp + (duration_days as i64 * SECONDS_PER_DAY));
 
-        // Transfer rent to owner (keep collateral in escrow)
-        let owner_payment_ctx = CpiContext::new_with_signer(
-            ctx.accounts.system_program.to_account_info(),
-            anchor_lang::system_program::Transfer {
-                from: ctx.accounts.escrow_vault.to_account_info(),
-                to: ctx.accounts.owner.to_account_info(),
-            },
-            signer_seeds,
-        );
-        anchor_lang::system_program::transfer(owner_payment_ctx, total_rent)?;
+        let vault_bump = [ctx.bumps.escrow_vault];
+        let vault_seeds: &[&[u8]] = &[b"rental_vault", listing.mint.as_ref(), &vault_bump];
+        let vault_signer = &[vault_seeds];
+        anchor_lang::system_program::transfer(
+            CpiContext::new_with_signer(
+                ctx.accounts.system_program.to_account_info(),
+                anchor_lang::system_program::Transfer {
+                    from: ctx.accounts.escrow_vault.to_account_info(),
+                    to: ctx.accounts.owner.to_account_info(),
+                },
+                vault_signer,
+            ),
+            total_rent,
+        )?;
 
         Ok(())
     }
 
     pub fn return_nft(ctx: Context<ReturnNFT>) -> Result<()> {
         let listing = &mut ctx.accounts.listing;
-        let clock = Clock::get()?;
 
         require!(listing.current_renter.is_some(), RentalError::NotRented);
         require!(
@@ -129,40 +141,35 @@ pub mod nft_rental {
             RentalError::UnauthorizedRenter
         );
 
-        // Transfer NFT back to escrow
-        let transfer_ctx = CpiContext::new(
-            ctx.accounts.token_program.to_account_info(),
-            Transfer {
-                from: ctx.accounts.renter_token_account.to_account_info(),
-                to: ctx.accounts.escrow_token_account.to_account_info(),
-                authority: ctx.accounts.renter.to_account_info(),
-            },
-        );
-        token::transfer(transfer_ctx, 1)?;
+        token::transfer(
+            CpiContext::new(
+                ctx.accounts.token_program.to_account_info(),
+                Transfer {
+                    from: ctx.accounts.renter_token_account.to_account_info(),
+                    to: ctx.accounts.escrow_token_account.to_account_info(),
+                    authority: ctx.accounts.renter.to_account_info(),
+                },
+            ),
+            1,
+        )?;
 
-        // Return collateral to renter
-        let bump = ctx.bumps.escrow_vault;
-        let seeds = &[
-            b"vault",
-            listing.mint.as_ref(),
-            &[bump],
-        ];
-        let signer_seeds = &[&seeds[..]];
+        let vault_bump = [ctx.bumps.escrow_vault];
+        let vault_seeds: &[&[u8]] = &[b"rental_vault", listing.mint.as_ref(), &vault_bump];
+        let vault_signer = &[vault_seeds];
+        anchor_lang::system_program::transfer(
+            CpiContext::new_with_signer(
+                ctx.accounts.system_program.to_account_info(),
+                anchor_lang::system_program::Transfer {
+                    from: ctx.accounts.escrow_vault.to_account_info(),
+                    to: ctx.accounts.renter.to_account_info(),
+                },
+                vault_signer,
+            ),
+            listing.collateral_lamports,
+        )?;
 
-        let collateral_ctx = CpiContext::new_with_signer(
-            ctx.accounts.system_program.to_account_info(),
-            anchor_lang::system_program::Transfer {
-                from: ctx.accounts.escrow_vault.to_account_info(),
-                to: ctx.accounts.renter.to_account_info(),
-            },
-            signer_seeds,
-        );
-        anchor_lang::system_program::transfer(collateral_ctx, listing.collateral_lamports)?;
-
-        // Clear rental info
         listing.current_renter = None;
         listing.rental_end_time = None;
-
         Ok(())
     }
 
@@ -176,171 +183,426 @@ pub mod nft_rental {
             RentalError::RentalNotExpired
         );
 
-        // Transfer NFT back to owner
-        let bump = ctx.bumps.escrow_token_account;
-        let seeds = &[
-            b"escrow",
-            listing.mint.as_ref(),
-            &[bump],
-        ];
-        let signer_seeds = &[&seeds[..]];
+        let escrow_bump = [ctx.bumps.escrow_token_account];
+        let escrow_seeds: &[&[u8]] = &[b"rental_escrow", listing.mint.as_ref(), &escrow_bump];
+        let escrow_signer = &[escrow_seeds];
+        token::transfer(
+            CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(),
+                Transfer {
+                    from: ctx.accounts.escrow_token_account.to_account_info(),
+                    to: ctx.accounts.owner_token_account.to_account_info(),
+                    authority: ctx.accounts.escrow_token_account.to_account_info(),
+                },
+                escrow_signer,
+            ),
+            1,
+        )?;
 
-        let transfer_ctx = CpiContext::new_with_signer(
-            ctx.accounts.token_program.to_account_info(),
-            Transfer {
-                from: ctx.accounts.escrow_token_account.to_account_info(),
-                to: ctx.accounts.owner_token_account.to_account_info(),
-                authority: ctx.accounts.escrow_token_account.to_account_info(),
-            },
-            signer_seeds,
-        );
-        token::transfer(transfer_ctx, 1)?;
+        let vault_bump = [ctx.bumps.escrow_vault];
+        let vault_seeds: &[&[u8]] = &[b"rental_vault", listing.mint.as_ref(), &vault_bump];
+        let vault_signer = &[vault_seeds];
+        anchor_lang::system_program::transfer(
+            CpiContext::new_with_signer(
+                ctx.accounts.system_program.to_account_info(),
+                anchor_lang::system_program::Transfer {
+                    from: ctx.accounts.escrow_vault.to_account_info(),
+                    to: ctx.accounts.owner.to_account_info(),
+                },
+                vault_signer,
+            ),
+            listing.collateral_lamports,
+        )?;
 
-        // Transfer collateral to owner (penalty for not returning)
-        let vault_bump = ctx.bumps.escrow_vault;
-        let vault_seeds = &[
-            b"vault",
-            listing.mint.as_ref(),
-            &[vault_bump],
-        ];
-        let vault_signer_seeds = &[&vault_seeds[..]];
-
-        let collateral_ctx = CpiContext::new_with_signer(
-            ctx.accounts.system_program.to_account_info(),
-            anchor_lang::system_program::Transfer {
-                from: ctx.accounts.escrow_vault.to_account_info(),
-                to: ctx.accounts.owner.to_account_info(),
-            },
-            vault_signer_seeds,
-        );
-        anchor_lang::system_program::transfer(collateral_ctx, listing.collateral_lamports)?;
-
-        // Clear rental info and deactivate listing
         listing.current_renter = None;
         listing.rental_end_time = None;
         listing.is_active = false;
-
         Ok(())
     }
 
     pub fn unlist_nft(ctx: Context<UnlistNFT>) -> Result<()> {
         let listing = &mut ctx.accounts.listing;
-
         require!(listing.current_renter.is_none(), RentalError::CannotUnlistRentedNFT);
 
-        // Transfer NFT back to owner
-        let bump = ctx.bumps.escrow_token_account;
-        let seeds = &[
-            b"escrow",
-            listing.mint.as_ref(),
-            &[bump],
-        ];
-        let signer_seeds = &[&seeds[..]];
-
-        let transfer_ctx = CpiContext::new_with_signer(
-            ctx.accounts.token_program.to_account_info(),
-            Transfer {
-                from: ctx.accounts.escrow_token_account.to_account_info(),
-                to: ctx.accounts.owner_token_account.to_account_info(),
-                authority: ctx.accounts.escrow_token_account.to_account_info(),
-            },
-            signer_seeds,
-        );
-        token::transfer(transfer_ctx, 1)?;
+        let escrow_bump = [ctx.bumps.escrow_token_account];
+        let escrow_seeds: &[&[u8]] = &[b"rental_escrow", listing.mint.as_ref(), &escrow_bump];
+        let escrow_signer = &[escrow_seeds];
+        token::transfer(
+            CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(),
+                Transfer {
+                    from: ctx.accounts.escrow_token_account.to_account_info(),
+                    to: ctx.accounts.owner_token_account.to_account_info(),
+                    authority: ctx.accounts.escrow_token_account.to_account_info(),
+                },
+                escrow_signer,
+            ),
+            1,
+        )?;
 
         listing.is_active = false;
-
         Ok(())
     }
 
     pub fn list_for_sale(ctx: Context<ListForSale>, price_lamports: u64) -> Result<()> {
         require!(price_lamports > 0, RentalError::InvalidPrice);
-        let sale_listing = &mut ctx.accounts.sale_listing;
+        let listing = &mut ctx.accounts.sale_listing;
         let clock = Clock::get()?;
 
-        let transfer_ctx = CpiContext::new(
-            ctx.accounts.token_program.to_account_info(),
-            Transfer {
-                from: ctx.accounts.owner_token_account.to_account_info(),
-                to: ctx.accounts.sale_escrow_token.to_account_info(),
-                authority: ctx.accounts.owner.to_account_info(),
-            },
-        );
-        token::transfer(transfer_ctx, 1)?;
+        token::transfer(
+            CpiContext::new(
+                ctx.accounts.token_program.to_account_info(),
+                Transfer {
+                    from: ctx.accounts.owner_token_account.to_account_info(),
+                    to: ctx.accounts.sale_escrow_token.to_account_info(),
+                    authority: ctx.accounts.owner.to_account_info(),
+                },
+            ),
+            1,
+        )?;
 
-        sale_listing.seller = ctx.accounts.owner.key();
-        sale_listing.mint = ctx.accounts.mint.key();
-        sale_listing.price_lamports = price_lamports;
-        sale_listing.is_active = true;
-        sale_listing.created_at = clock.unix_timestamp;
-
+        listing.seller = ctx.accounts.owner.key();
+        listing.mint = ctx.accounts.mint.key();
+        listing.price_lamports = price_lamports;
+        listing.is_active = true;
+        listing.created_at = clock.unix_timestamp;
         Ok(())
     }
 
     pub fn buy_sale(ctx: Context<BuySale>) -> Result<()> {
-        let sale_listing = &mut ctx.accounts.sale_listing;
-        require!(sale_listing.is_active, RentalError::SaleNotActive);
-        require!(
-            sale_listing.seller != ctx.accounts.buyer.key(),
-            RentalError::CannotBuyOwnListing
-        );
+        let listing = &mut ctx.accounts.sale_listing;
+        require!(listing.is_active, RentalError::SaleNotActive);
+        require!(listing.seller != ctx.accounts.buyer.key(), RentalError::CannotBuyOwnListing);
 
-        let price = sale_listing.price_lamports;
-        let mint_key = sale_listing.mint;
+        anchor_lang::system_program::transfer(
+            CpiContext::new(
+                ctx.accounts.system_program.to_account_info(),
+                anchor_lang::system_program::Transfer {
+                    from: ctx.accounts.buyer.to_account_info(),
+                    to: ctx.accounts.seller.to_account_info(),
+                },
+            ),
+            listing.price_lamports,
+        )?;
 
-        let transfer_sol = CpiContext::new(
-            ctx.accounts.system_program.to_account_info(),
-            anchor_lang::system_program::Transfer {
-                from: ctx.accounts.buyer.to_account_info(),
-                to: ctx.accounts.seller.to_account_info(),
-            },
-        );
-        anchor_lang::system_program::transfer(transfer_sol, price)?;
+        let sale_bump = [ctx.bumps.sale_escrow_token];
+        let sale_seeds: &[&[u8]] = &[b"sale_escrow", listing.mint.as_ref(), &sale_bump];
+        let escrow_signer = &[sale_seeds];
+        token::transfer(
+            CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(),
+                Transfer {
+                    from: ctx.accounts.sale_escrow_token.to_account_info(),
+                    to: ctx.accounts.buyer_token_account.to_account_info(),
+                    authority: ctx.accounts.sale_escrow_token.to_account_info(),
+                },
+                escrow_signer,
+            ),
+            1,
+        )?;
 
-        let bump = ctx.bumps.sale_escrow_token;
-        let seeds: &[&[u8]] = &[b"sale_escrow", mint_key.as_ref(), &[bump]];
-        let signer_seeds = &[seeds];
-
-        let transfer_nft = CpiContext::new_with_signer(
-            ctx.accounts.token_program.to_account_info(),
-            Transfer {
-                from: ctx.accounts.sale_escrow_token.to_account_info(),
-                to: ctx.accounts.buyer_token_account.to_account_info(),
-                authority: ctx.accounts.sale_escrow_token.to_account_info(),
-            },
-            signer_seeds,
-        );
-        token::transfer(transfer_nft, 1)?;
-
-        sale_listing.is_active = false;
-
+        listing.is_active = false;
         Ok(())
     }
 
     pub fn cancel_sale(ctx: Context<CancelSale>) -> Result<()> {
-        let sale_listing = &mut ctx.accounts.sale_listing;
-        require!(sale_listing.is_active, RentalError::SaleNotActive);
+        let listing = &mut ctx.accounts.sale_listing;
+        require!(listing.is_active, RentalError::SaleNotActive);
 
-        let mint_key = sale_listing.mint;
-        let bump = ctx.bumps.sale_escrow_token;
-        let seeds: &[&[u8]] = &[b"sale_escrow", mint_key.as_ref(), &[bump]];
-        let signer_seeds = &[seeds];
+        let sale_bump = [ctx.bumps.sale_escrow_token];
+        let sale_seeds: &[&[u8]] = &[b"sale_escrow", listing.mint.as_ref(), &sale_bump];
+        let escrow_signer = &[sale_seeds];
+        token::transfer(
+            CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(),
+                Transfer {
+                    from: ctx.accounts.sale_escrow_token.to_account_info(),
+                    to: ctx.accounts.owner_token_account.to_account_info(),
+                    authority: ctx.accounts.sale_escrow_token.to_account_info(),
+                },
+                escrow_signer,
+            ),
+            1,
+        )?;
 
-        let transfer_ctx = CpiContext::new_with_signer(
-            ctx.accounts.token_program.to_account_info(),
-            Transfer {
-                from: ctx.accounts.sale_escrow_token.to_account_info(),
-                to: ctx.accounts.owner_token_account.to_account_info(),
-                authority: ctx.accounts.sale_escrow_token.to_account_info(),
-            },
-            signer_seeds,
-        );
-        token::transfer(transfer_ctx, 1)?;
-
-        sale_listing.is_active = false;
-
+        listing.is_active = false;
         Ok(())
     }
+
+    pub fn create_swap(
+        ctx: Context<CreateSwap>,
+        taker_mint: Pubkey,
+        maker_sol_delta_lamports: u64,
+    ) -> Result<()> {
+        let offer = &mut ctx.accounts.swap_offer;
+        let clock = Clock::get()?;
+
+        token::transfer(
+            CpiContext::new(
+                ctx.accounts.token_program.to_account_info(),
+                Transfer {
+                    from: ctx.accounts.maker_token_account.to_account_info(),
+                    to: ctx.accounts.swap_escrow_maker.to_account_info(),
+                    authority: ctx.accounts.maker.to_account_info(),
+                },
+            ),
+            1,
+        )?;
+
+        offer.maker = ctx.accounts.maker.key();
+        offer.maker_mint = ctx.accounts.maker_mint.key();
+        offer.taker_mint = taker_mint;
+        offer.maker_sol_delta_lamports = maker_sol_delta_lamports;
+        offer.state = OfferState::Active;
+        offer.created_at = clock.unix_timestamp;
+        Ok(())
+    }
+
+    pub fn accept_swap(ctx: Context<AcceptSwap>) -> Result<()> {
+        let offer = &mut ctx.accounts.swap_offer;
+        require!(offer.state == OfferState::Active, RentalError::SwapNotActive);
+        require!(offer.maker != ctx.accounts.taker.key(), RentalError::CannotSwapWithSelf);
+        require!(
+            ctx.accounts.taker_token_account.mint == offer.taker_mint,
+            RentalError::InvalidSwapMint
+        );
+
+        token::transfer(
+            CpiContext::new(
+                ctx.accounts.token_program.to_account_info(),
+                Transfer {
+                    from: ctx.accounts.taker_token_account.to_account_info(),
+                    to: ctx.accounts.maker_receive_token_account.to_account_info(),
+                    authority: ctx.accounts.taker.to_account_info(),
+                },
+            ),
+            1,
+        )?;
+
+        let maker_escrow_bump = [ctx.bumps.swap_escrow_maker];
+        let maker_escrow_seeds: &[&[u8]] =
+            &[b"swap_escrow_maker", offer.maker_mint.as_ref(), &maker_escrow_bump];
+        let maker_escrow_signer = &[maker_escrow_seeds];
+        token::transfer(
+            CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(),
+                Transfer {
+                    from: ctx.accounts.swap_escrow_maker.to_account_info(),
+                    to: ctx.accounts.taker_receive_token_account.to_account_info(),
+                    authority: ctx.accounts.swap_escrow_maker.to_account_info(),
+                },
+                maker_escrow_signer,
+            ),
+            1,
+        )?;
+
+        if offer.maker_sol_delta_lamports > 0 {
+            anchor_lang::system_program::transfer(
+                CpiContext::new(
+                    ctx.accounts.system_program.to_account_info(),
+                    anchor_lang::system_program::Transfer {
+                        from: ctx.accounts.taker.to_account_info(),
+                        to: ctx.accounts.maker.to_account_info(),
+                    },
+                ),
+                offer.maker_sol_delta_lamports,
+            )?;
+        }
+
+        offer.state = OfferState::Filled;
+        Ok(())
+    }
+
+    pub fn cancel_swap(ctx: Context<CancelSwap>) -> Result<()> {
+        let offer = &mut ctx.accounts.swap_offer;
+        require!(offer.state == OfferState::Active, RentalError::SwapNotActive);
+
+        let maker_escrow_bump = [ctx.bumps.swap_escrow_maker];
+        let maker_escrow_seeds: &[&[u8]] =
+            &[b"swap_escrow_maker", offer.maker_mint.as_ref(), &maker_escrow_bump];
+        let maker_escrow_signer = &[maker_escrow_seeds];
+        token::transfer(
+            CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(),
+                Transfer {
+                    from: ctx.accounts.swap_escrow_maker.to_account_info(),
+                    to: ctx.accounts.maker_token_account.to_account_info(),
+                    authority: ctx.accounts.swap_escrow_maker.to_account_info(),
+                },
+                maker_escrow_signer,
+            ),
+            1,
+        )?;
+
+        offer.state = OfferState::Cancelled;
+        Ok(())
+    }
+}
+
+const SECONDS_PER_DAY: i64 = 24 * 60 * 60;
+
+#[derive(Accounts)]
+pub struct ListNFT<'info> {
+    #[account(
+        init,
+        payer = owner,
+        space = 8 + RentalListing::INIT_SPACE,
+        seeds = [b"rental_listing", mint.key().as_ref()],
+        bump
+    )]
+    pub listing: Box<Account<'info, RentalListing>>,
+    #[account(
+        init,
+        payer = owner,
+        seeds = [b"rental_escrow", mint.key().as_ref()],
+        bump,
+        token::mint = mint,
+        token::authority = escrow_token_account,
+    )]
+    pub escrow_token_account: Box<Account<'info, TokenAccount>>,
+    /// CHECK: validated at runtime via token accessor checks.
+    #[account(mut)]
+    pub owner_token_account: AccountInfo<'info>,
+    pub mint: Box<Account<'info, Mint>>,
+    #[account(mut)]
+    pub owner: Signer<'info>,
+    pub system_program: Program<'info, System>,
+    pub token_program: Program<'info, Token>,
+}
+
+#[derive(Accounts)]
+pub struct RentNFT<'info> {
+    #[account(
+        mut,
+        seeds = [b"rental_listing", listing.mint.as_ref()],
+        bump
+    )]
+    pub listing: Account<'info, RentalListing>,
+    #[account(
+        mut,
+        seeds = [b"rental_escrow", listing.mint.as_ref()],
+        bump
+    )]
+    pub escrow_token_account: Account<'info, TokenAccount>,
+    #[account(
+        mut,
+        seeds = [b"rental_vault", listing.mint.as_ref()],
+        bump
+    )]
+    /// CHECK: PDA used as SOL vault.
+    pub escrow_vault: AccountInfo<'info>,
+    #[account(
+        init_if_needed,
+        payer = renter,
+        associated_token::mint = mint,
+        associated_token::authority = renter
+    )]
+    pub renter_token_account: Account<'info, TokenAccount>,
+    #[account(address = listing.mint)]
+    pub mint: Account<'info, Mint>,
+    /// CHECK: receives rent payout.
+    #[account(mut)]
+    pub owner: AccountInfo<'info>,
+    #[account(mut)]
+    pub renter: Signer<'info>,
+    pub system_program: Program<'info, System>,
+    pub token_program: Program<'info, Token>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
+    pub rent: Sysvar<'info, Rent>,
+}
+
+#[derive(Accounts)]
+pub struct ReturnNFT<'info> {
+    #[account(
+        mut,
+        seeds = [b"rental_listing", listing.mint.as_ref()],
+        bump
+    )]
+    pub listing: Account<'info, RentalListing>,
+    #[account(
+        mut,
+        seeds = [b"rental_escrow", listing.mint.as_ref()],
+        bump
+    )]
+    pub escrow_token_account: Account<'info, TokenAccount>,
+    #[account(
+        mut,
+        seeds = [b"rental_vault", listing.mint.as_ref()],
+        bump
+    )]
+    /// CHECK: PDA used as SOL vault.
+    pub escrow_vault: AccountInfo<'info>,
+    #[account(
+        mut,
+        constraint = renter_token_account.mint == listing.mint,
+        constraint = renter_token_account.owner == renter.key(),
+        constraint = renter_token_account.amount == 1
+    )]
+    pub renter_token_account: Account<'info, TokenAccount>,
+    #[account(mut)]
+    pub renter: Signer<'info>,
+    pub system_program: Program<'info, System>,
+    pub token_program: Program<'info, Token>,
+}
+
+#[derive(Accounts)]
+pub struct ClaimExpiredNFT<'info> {
+    #[account(
+        mut,
+        seeds = [b"rental_listing", listing.mint.as_ref()],
+        bump,
+        constraint = listing.owner == owner.key()
+    )]
+    pub listing: Account<'info, RentalListing>,
+    #[account(
+        mut,
+        seeds = [b"rental_escrow", listing.mint.as_ref()],
+        bump
+    )]
+    pub escrow_token_account: Account<'info, TokenAccount>,
+    #[account(
+        mut,
+        seeds = [b"rental_vault", listing.mint.as_ref()],
+        bump
+    )]
+    /// CHECK: PDA used as SOL vault.
+    pub escrow_vault: AccountInfo<'info>,
+    #[account(
+        mut,
+        constraint = owner_token_account.mint == listing.mint,
+        constraint = owner_token_account.owner == owner.key()
+    )]
+    pub owner_token_account: Account<'info, TokenAccount>,
+    #[account(mut)]
+    pub owner: Signer<'info>,
+    pub system_program: Program<'info, System>,
+    pub token_program: Program<'info, Token>,
+}
+
+#[derive(Accounts)]
+pub struct UnlistNFT<'info> {
+    #[account(
+        mut,
+        seeds = [b"rental_listing", listing.mint.as_ref()],
+        bump,
+        constraint = listing.owner == owner.key()
+    )]
+    pub listing: Account<'info, RentalListing>,
+    #[account(
+        mut,
+        seeds = [b"rental_escrow", listing.mint.as_ref()],
+        bump
+    )]
+    pub escrow_token_account: Account<'info, TokenAccount>,
+    #[account(
+        mut,
+        constraint = owner_token_account.mint == listing.mint,
+        constraint = owner_token_account.owner == owner.key()
+    )]
+    pub owner_token_account: Account<'info, TokenAccount>,
+    #[account(mut)]
+    pub owner: Signer<'info>,
+    pub token_program: Program<'info, Token>,
 }
 
 #[derive(Accounts)]
@@ -348,12 +610,11 @@ pub struct ListForSale<'info> {
     #[account(
         init,
         payer = owner,
-        space = 8 + 32 + 32 + 8 + 1 + 7 + 8,
+        space = 8 + SaleListing::INIT_SPACE,
         seeds = [b"sale_listing", mint.key().as_ref()],
         bump
     )]
     pub sale_listing: Account<'info, SaleListing>,
-
     #[account(
         init,
         payer = owner,
@@ -363,7 +624,6 @@ pub struct ListForSale<'info> {
         token::authority = sale_escrow_token,
     )]
     pub sale_escrow_token: Account<'info, TokenAccount>,
-
     #[account(
         mut,
         constraint = owner_token_account.mint == mint.key(),
@@ -371,48 +631,24 @@ pub struct ListForSale<'info> {
         constraint = owner_token_account.amount == 1
     )]
     pub owner_token_account: Account<'info, TokenAccount>,
-
     pub mint: Account<'info, Mint>,
-
-    #[account(
-        seeds = [b"metadata", mpl_token_metadata::ID.as_ref(), mint.key().as_ref()],
-        bump,
-        seeds::program = mpl_token_metadata::ID
-    )]
-    pub metadata: AccountInfo<'info>,
-
     #[account(mut)]
     pub owner: Signer<'info>,
-
     pub system_program: Program<'info, System>,
     pub token_program: Program<'info, Token>,
-    pub associated_token_program: Program<'info, AssociatedToken>,
-    pub rent: Sysvar<'info, Rent>,
 }
 
 #[derive(Accounts)]
 pub struct BuySale<'info> {
-    #[account(
-        mut,
-        seeds = [b"sale_listing", sale_listing.mint.as_ref()],
-        bump
-    )]
+    #[account(mut, seeds = [b"sale_listing", sale_listing.mint.as_ref()], bump)]
     pub sale_listing: Account<'info, SaleListing>,
-
-    #[account(
-        mut,
-        seeds = [b"sale_escrow", sale_listing.mint.as_ref()],
-        bump
-    )]
+    #[account(mut, seeds = [b"sale_escrow", sale_listing.mint.as_ref()], bump)]
     pub sale_escrow_token: Account<'info, TokenAccount>,
-
-    /// CHECK: receives SOL from buyer
+    /// CHECK: seller wallet receives SOL.
     #[account(mut, address = sale_listing.seller)]
     pub seller: AccountInfo<'info>,
-
     #[account(mut)]
     pub buyer: Signer<'info>,
-
     #[account(
         init_if_needed,
         payer = buyer,
@@ -420,10 +656,8 @@ pub struct BuySale<'info> {
         associated_token::authority = buyer
     )]
     pub buyer_token_account: Account<'info, TokenAccount>,
-
     #[account(mut, address = sale_listing.mint)]
     pub mint: Account<'info, Mint>,
-
     pub system_program: Program<'info, System>,
     pub token_program: Program<'info, Token>,
     pub associated_token_program: Program<'info, AssociatedToken>,
@@ -439,124 +673,91 @@ pub struct CancelSale<'info> {
         constraint = sale_listing.seller == owner.key()
     )]
     pub sale_listing: Account<'info, SaleListing>,
-
     #[account(
         mut,
         seeds = [b"sale_escrow", sale_listing.mint.as_ref()],
         bump
     )]
     pub sale_escrow_token: Account<'info, TokenAccount>,
-
     #[account(
         mut,
         constraint = owner_token_account.mint == sale_listing.mint,
         constraint = owner_token_account.owner == owner.key()
     )]
     pub owner_token_account: Account<'info, TokenAccount>,
-
     #[account(mut)]
     pub owner: Signer<'info>,
-
     pub token_program: Program<'info, Token>,
 }
 
 #[derive(Accounts)]
-pub struct ListNFT<'info> {
+pub struct CreateSwap<'info> {
     #[account(
         init,
-        payer = owner,
-        space = 8 + 32 + 32 + 8 + 8 + 4 + 4 + 1 + 33 + 9 + 8,
-        seeds = [b"listing", mint.key().as_ref()],
+        payer = maker,
+        space = 8 + SwapOffer::INIT_SPACE,
+        seeds = [b"swap_offer", maker_mint.key().as_ref()],
         bump
     )]
-    pub listing: Account<'info, RentalListing>,
-    
+    pub swap_offer: Account<'info, SwapOffer>,
     #[account(
         init,
-        payer = owner,
-        seeds = [b"escrow", mint.key().as_ref()],
+        payer = maker,
+        seeds = [b"swap_escrow_maker", maker_mint.key().as_ref()],
         bump,
-        token::mint = mint,
-        token::authority = escrow_token_account,
+        token::mint = maker_mint,
+        token::authority = swap_escrow_maker
     )]
-    pub escrow_token_account: Account<'info, TokenAccount>,
-    
-    #[account(
-        init,
-        payer = owner,
-        seeds = [b"vault", mint.key().as_ref()],
-        bump,
-        space = 0
-    )]
-    /// CHECK: This is a PDA used to hold SOL
-    pub escrow_vault: AccountInfo<'info>,
-    
+    pub swap_escrow_maker: Account<'info, TokenAccount>,
     #[account(
         mut,
-        constraint = owner_token_account.mint == mint.key(),
-        constraint = owner_token_account.owner == owner.key(),
-        constraint = owner_token_account.amount == 1
+        constraint = maker_token_account.mint == maker_mint.key(),
+        constraint = maker_token_account.owner == maker.key(),
+        constraint = maker_token_account.amount == 1
     )]
-    pub owner_token_account: Account<'info, TokenAccount>,
-    
-    pub mint: Account<'info, Mint>,
-    
-    /// CHECK: Metadata account validation
-    #[account(
-        seeds = [b"metadata", mpl_token_metadata::ID.as_ref(), mint.key().as_ref()],
-        bump,
-        seeds::program = mpl_token_metadata::ID
-    )]
-    pub metadata: AccountInfo<'info>,
-    
+    pub maker_token_account: Account<'info, TokenAccount>,
+    pub maker_mint: Account<'info, Mint>,
     #[account(mut)]
-    pub owner: Signer<'info>,
-    
+    pub maker: Signer<'info>,
     pub system_program: Program<'info, System>,
     pub token_program: Program<'info, Token>,
-    pub associated_token_program: Program<'info, AssociatedToken>,
-    pub rent: Sysvar<'info, Rent>,
 }
 
 #[derive(Accounts)]
-pub struct RentNFT<'info> {
+pub struct AcceptSwap<'info> {
+    #[account(mut, seeds = [b"swap_offer", swap_offer.maker_mint.as_ref()], bump)]
+    pub swap_offer: Box<Account<'info, SwapOffer>>,
+    #[account(mut, seeds = [b"swap_escrow_maker", swap_offer.maker_mint.as_ref()], bump)]
+    pub swap_escrow_maker: Box<Account<'info, TokenAccount>>,
+    /// CHECK: maker wallet receives optional SOL delta.
+    #[account(mut, address = swap_offer.maker)]
+    pub maker: AccountInfo<'info>,
+    #[account(mut)]
+    pub taker: Signer<'info>,
     #[account(
         mut,
-        seeds = [b"listing", listing.mint.as_ref()],
-        bump
+        constraint = taker_token_account.owner == taker.key(),
+        constraint = taker_token_account.amount == 1
     )]
-    pub listing: Account<'info, RentalListing>,
-    
-    #[account(
-        mut,
-        seeds = [b"escrow", listing.mint.as_ref()],
-        bump
-    )]
-    pub escrow_token_account: Account<'info, TokenAccount>,
-    
-    #[account(
-        mut,
-        seeds = [b"vault", listing.mint.as_ref()],
-        bump
-    )]
-    /// CHECK: This is a PDA used to hold SOL
-    pub escrow_vault: AccountInfo<'info>,
-    
+    pub taker_token_account: Box<Account<'info, TokenAccount>>,
     #[account(
         init_if_needed,
-        payer = renter,
-        associated_token::mint = listing.mint,
-        associated_token::authority = renter
+        payer = taker,
+        associated_token::mint = maker_mint,
+        associated_token::authority = taker
     )]
-    pub renter_token_account: Account<'info, TokenAccount>,
-    
-    /// CHECK: Owner account for rent payment
-    #[account(mut, constraint = owner.key() == listing.owner)]
-    pub owner: AccountInfo<'info>,
-    
-    #[account(mut)]
-    pub renter: Signer<'info>,
-    
+    pub taker_receive_token_account: Box<Account<'info, TokenAccount>>,
+    #[account(
+        init_if_needed,
+        payer = taker,
+        associated_token::mint = taker_mint,
+        associated_token::authority = maker
+    )]
+    pub maker_receive_token_account: Box<Account<'info, TokenAccount>>,
+    #[account(mut, address = swap_offer.maker_mint)]
+    pub maker_mint: Box<Account<'info, Mint>>,
+    #[account(mut, address = swap_offer.taker_mint)]
+    pub taker_mint: Box<Account<'info, Mint>>,
     pub system_program: Program<'info, System>,
     pub token_program: Program<'info, Token>,
     pub associated_token_program: Program<'info, AssociatedToken>,
@@ -564,110 +765,28 @@ pub struct RentNFT<'info> {
 }
 
 #[derive(Accounts)]
-pub struct ReturnNFT<'info> {
+pub struct CancelSwap<'info> {
     #[account(
         mut,
-        seeds = [b"listing", listing.mint.as_ref()],
-        bump
-    )]
-    pub listing: Account<'info, RentalListing>,
-    
-    #[account(
-        mut,
-        seeds = [b"escrow", listing.mint.as_ref()],
-        bump
-    )]
-    pub escrow_token_account: Account<'info, TokenAccount>,
-    
-    #[account(
-        mut,
-        seeds = [b"vault", listing.mint.as_ref()],
-        bump
-    )]
-    /// CHECK: This is a PDA used to hold SOL
-    pub escrow_vault: AccountInfo<'info>,
-    
-    #[account(
-        mut,
-        constraint = renter_token_account.mint == listing.mint,
-        constraint = renter_token_account.owner == renter.key(),
-        constraint = renter_token_account.amount == 1
-    )]
-    pub renter_token_account: Account<'info, TokenAccount>,
-    
-    #[account(mut)]
-    pub renter: Signer<'info>,
-    
-    pub system_program: Program<'info, System>,
-    pub token_program: Program<'info, Token>,
-}
-
-#[derive(Accounts)]
-pub struct ClaimExpiredNFT<'info> {
-    #[account(
-        mut,
-        seeds = [b"listing", listing.mint.as_ref()],
+        seeds = [b"swap_offer", swap_offer.maker_mint.as_ref()],
         bump,
-        constraint = listing.owner == owner.key()
+        constraint = swap_offer.maker == maker.key()
     )]
-    pub listing: Account<'info, RentalListing>,
-    
+    pub swap_offer: Account<'info, SwapOffer>,
     #[account(
         mut,
-        seeds = [b"escrow", listing.mint.as_ref()],
+        seeds = [b"swap_escrow_maker", swap_offer.maker_mint.as_ref()],
         bump
     )]
-    pub escrow_token_account: Account<'info, TokenAccount>,
-    
+    pub swap_escrow_maker: Account<'info, TokenAccount>,
     #[account(
         mut,
-        seeds = [b"vault", listing.mint.as_ref()],
-        bump
+        constraint = maker_token_account.owner == maker.key(),
+        constraint = maker_token_account.mint == swap_offer.maker_mint
     )]
-    /// CHECK: This is a PDA used to hold SOL
-    pub escrow_vault: AccountInfo<'info>,
-    
-    #[account(
-        mut,
-        constraint = owner_token_account.mint == listing.mint,
-        constraint = owner_token_account.owner == owner.key()
-    )]
-    pub owner_token_account: Account<'info, TokenAccount>,
-    
+    pub maker_token_account: Account<'info, TokenAccount>,
     #[account(mut)]
-    pub owner: Signer<'info>,
-    
-    pub system_program: Program<'info, System>,
-    pub token_program: Program<'info, Token>,
-}
-
-#[derive(Accounts)]
-pub struct UnlistNFT<'info> {
-    #[account(
-        mut,
-        seeds = [b"listing", listing.mint.as_ref()],
-        bump,
-        constraint = listing.owner == owner.key()
-    )]
-    pub listing: Account<'info, RentalListing>,
-    
-    #[account(
-        mut,
-        seeds = [b"escrow", listing.mint.as_ref()],
-        bump
-    )]
-    pub escrow_token_account: Account<'info, TokenAccount>,
-    
-    #[account(
-        mut,
-        constraint = owner_token_account.mint == listing.mint,
-        constraint = owner_token_account.owner == owner.key()
-    )]
-    pub owner_token_account: Account<'info, TokenAccount>,
-    
-    #[account(mut)]
-    pub owner: Signer<'info>,
-    
+    pub maker: Signer<'info>,
     pub token_program: Program<'info, Token>,
 }
 
@@ -685,6 +804,10 @@ pub struct RentalListing {
     pub created_at: i64,
 }
 
+impl RentalListing {
+    pub const INIT_SPACE: usize = 32 + 32 + 8 + 8 + 4 + 4 + 1 + (1 + 32) + (1 + 8) + 8;
+}
+
 #[account]
 pub struct SaleListing {
     pub seller: Pubkey,
@@ -692,6 +815,31 @@ pub struct SaleListing {
     pub price_lamports: u64,
     pub is_active: bool,
     pub created_at: i64,
+}
+
+impl SaleListing {
+    pub const INIT_SPACE: usize = 32 + 32 + 8 + 1 + 8;
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, PartialEq, Eq)]
+pub enum OfferState {
+    Active,
+    Filled,
+    Cancelled,
+}
+
+#[account]
+pub struct SwapOffer {
+    pub maker: Pubkey,
+    pub maker_mint: Pubkey,
+    pub taker_mint: Pubkey,
+    pub maker_sol_delta_lamports: u64,
+    pub state: OfferState,
+    pub created_at: i64,
+}
+
+impl SwapOffer {
+    pub const INIT_SPACE: usize = 32 + 32 + 32 + 8 + 1 + 8;
 }
 
 #[error_code]
@@ -718,4 +866,12 @@ pub enum RentalError {
     SaleNotActive,
     #[msg("Cannot buy your own listing")]
     CannotBuyOwnListing,
+    #[msg("Unauthorized owner account")]
+    UnauthorizedOwner,
+    #[msg("Swap offer is not active")]
+    SwapNotActive,
+    #[msg("Cannot swap with self")]
+    CannotSwapWithSelf,
+    #[msg("Swap mint did not match required mint")]
+    InvalidSwapMint,
 }

@@ -1,32 +1,37 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
+import { useWallet } from '@solana/wallet-adapter-react';
+import { WalletMultiButton } from '@solana/wallet-adapter-react-ui';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, ShieldCheck } from 'lucide-react';
 import { useSecurityMonitor } from '@/hooks/useSecurityMonitor';
 
 const Auth = () => {
   const [loading, setLoading] = useState(false);
 
-  const { signInWithGoogle, user } = useAuth();
+  const { connected, publicKey } = useWallet();
+  const { signInWithWallet, user } = useAuth();
   const { logAuthFailure } = useSecurityMonitor();
   const navigate = useNavigate();
 
-  const handleGoogle = async () => {
+  const handleWalletSignIn = async () => {
     setLoading(true);
     try {
-      const { error } = await signInWithGoogle();
+      const { error } = await signInWithWallet();
       if (error) {
-        logAuthFailure('Google OAuth error', { error: error.message });
+        logAuthFailure('Wallet sign in failed', { error: error.message });
         toast.error(error.message);
+      } else {
+        toast.success('Wallet authenticated successfully');
       }
     } catch (error) {
-      logAuthFailure('Google OAuth unexpected', {
+      logAuthFailure('Wallet sign in unexpected', {
         error: error instanceof Error ? error.message : 'Unknown error',
       });
-      toast.error('Could not start Google sign in');
+      toast.error('Could not complete wallet sign in');
     } finally {
       setLoading(false);
     }
@@ -56,23 +61,30 @@ const Auth = () => {
               Sign in
             </CardTitle>
             <CardDescription>
-              Continue with your Google account to use the marketplace
+              Connect your Solana wallet and sign a challenge message
             </CardDescription>
           </CardHeader>
 
-          <CardContent>
+          <CardContent className="space-y-3">
+            <WalletMultiButton className="!w-full !bg-gradient-primary !text-primary-foreground hover:!scale-[1.02] !transform !transition-all !duration-300 !rounded-full !font-semibold !h-11" />
             <Button
               type="button"
               variant="outline"
               className="w-full"
-              disabled={loading}
-              onClick={handleGoogle}
+              disabled={loading || !connected}
+              onClick={handleWalletSignIn}
             >
-              {loading ? 'Redirecting…' : 'Continue with Google'}
+              {loading ? 'Verifying signature…' : 'Sign message to authenticate'}
             </Button>
             <p className="text-xs text-center text-muted-foreground mt-3">
-              Opens Google in this tab (not a small popup). Allow redirects if your browser asks.
+              We verify your wallet signature locally with nonce and expiry checks.
             </p>
+            {connected && publicKey && (
+              <p className="text-xs text-center text-muted-foreground flex items-center justify-center gap-1">
+                <ShieldCheck size={14} />
+                Connected: {publicKey.toBase58().slice(0, 4)}...{publicKey.toBase58().slice(-4)}
+              </p>
+            )}
           </CardContent>
         </Card>
       </div>
